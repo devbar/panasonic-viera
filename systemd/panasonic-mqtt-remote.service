@@ -1,0 +1,24 @@
+[Unit]
+Description=Panasonic Viera MQTT Remote Subscriber
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/siron/git/panasonic-viera
+# Use python from environment; ensure python3 and package deps are available to this interpreter
+ExecStart=/usr/bin/env python3 /home/siron/git/panasonic-viera/scripts/mqtt_remote_service.py
+Restart=on-failure
+RestartSec=5
+# Example environment variables (override in /etc/systemd/system/... or use EnvironmentFile)
+Environment=MQTT_BROKER=localhost
+Environment=MQTT_PORT=1883
+Environment=MQTT_TOPIC=panasonic/remote
+Environment=MQTT_QOS=0
+Environment=TV_HOST=192.168.1.100
+Environment=TV_PORT=55000
+# Recommended: set User= to a non-root account if desired
+# User=panasonic
+
+[Install]
+WantedBy=multi-user.target
