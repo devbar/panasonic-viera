@@ -50,6 +50,7 @@ class RemoteControl:
         encryption_key=None,
         listen_host=None,
         listen_port=DEFAULT_PORT,
+        proxy=None,
     ):
         """Initialise the remote control."""
         self._host = host
@@ -63,6 +64,7 @@ class RemoteControl:
         self._session_id = None
         self._session_seq_num = None
         self._session_hmac_key = None
+        self._proxy = proxy
 
         self._service_to_sid = {}
         self._sid_to_service = {}
@@ -96,6 +98,24 @@ class RemoteControl:
                 "encrypted" if self._type == TV_TYPE_ENCRYPTED else "non-encrypted"
             )
             _LOGGER.debug("Determined TV type is %s\n", tv_enc_type)
+
+    def _get_opener(self):
+        """Return an opener with proxy if set."""
+        if self._proxy:
+            proxy_handler = None
+            try:
+                from urllib.request import ProxyHandler
+            except ImportError:
+                from urllib2 import ProxyHandler
+            proxy_handler = ProxyHandler({'http': self._proxy, 'https': self._proxy})
+            return build_opener(proxy_handler, HTTPHandler)
+        else:
+            return build_opener(HTTPHandler)
+
+    def _urlopen(self, req, timeout=5):
+        """Open a URL with proxy support."""
+        opener = self._get_opener()
+        return opener.open(req, timeout=timeout)
 
     def soap_request(self, url, urn, action, params, body_elem="m"):
         """Send a SOAP request to the TV."""
@@ -171,7 +191,7 @@ class RemoteControl:
         _LOGGER.debug("Sending to %s:\n%s\n%s", url, headers, soap_body)
         req = Request(url, soap_body, headers)
         try:
-            res = urlopen(req, timeout=5).read()
+            res = self._urlopen(req, timeout=5).read()
         except HTTPError as ex:
             if self._session_seq_num is not None:
                 self._session_seq_num -= 1
@@ -444,13 +464,11 @@ class RemoteControl:
             sock.close()
 
     def _do_custom_request(self, method, url, headers=None, timeout=10):
-        opener = build_opener(HTTPHandler)
+        opener = self._get_opener()  # <-- Use proxy-aware opener
         req = Request(url, headers=headers, method=method)
         res = opener.open(req, timeout=timeout)
-
         status = res.status
         header = dict(res.info())
-
         return status, header
 
     def upnp_service_subscribe(self, service, timeout=10):
@@ -604,10 +622,9 @@ class RemoteControl:
     def get_device_info(self):
         """Retrieve information from the TV."""
         url = URL_TEMPLATE.format(self._host, self._port, URL_CONTROL_NRC_DDD)
-
-        res = urlopen(url, timeout=5).read()
+        req = Request(url)
+        res = self._urlopen(req, timeout=5).read()  # <-- Use _urlopen
         device_info = xmltodict.parse(res)["root"]["device"]
-
         return device_info
 
     def open_webpage(self, url):
