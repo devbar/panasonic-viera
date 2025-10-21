@@ -93,57 +93,72 @@ class MqttRemoteSubscriber:
     def _on_disconnect(self, client, userdata, rc):
         _LOGGER.info("Disconnected from MQTT broker (rc=%s)", rc)
 
-    def _on_message(self, client, userdata, msg):
-        payload = None
+    def _get_payload(self, msg):
         try:
             payload_text = msg.payload.decode("utf-8").strip()
         except Exception:
             _LOGGER.exception("Failed to decode MQTT payload")
-            return
-
-        # Try JSON first
+            return None
+        
         try:
             data = json.loads(payload_text)
             if isinstance(data, dict):
-                payload = data.get("key") or data.get("action") or payload_text
-            else:
-                # If JSON is just a value (e.g. "POWER")
-                payload = data
+                return data.get("key") or data.get("action") or payload_text
+            else:                
+                return data
+        except Exception:            
+            return payload_text
+        
+    def _get_key_to_send(self,payload):
+        try:            
+            if isinstance(payload, str):
+                try:
+                    return Keys[payload.upper()]
+                except KeyError:
+                    try:
+                        return Keys(payload)
+                    except Exception:
+                        return None
+            elif isinstance(payload, (int,)):
+                return payload
         except Exception:
-            # Not JSON, use raw text
-            payload = payload_text
+            _LOGGER.debug("Could not map payload to Keys enum: %s", payload)
+            return None
+
+    def _on_message(self, client, userdata, msg):
+        payload = self._get_payload(msg)
 
         if payload is None:
             _LOGGER.debug("Empty payload received on topic %s", msg.topic)
             return
-
-        # Try to map to Keys enum by name or value
-        key_to_send = None
+        
+        if payload == "APPS":
+            apps = self.remote.get_apps()
+            client.publish(msg.topic + "/apps", json.dumps(apps))
+            _LOGGER.info("Available apps: %s", apps)
+            return
+        
+        if payload == "DEVICE_INFO":
+            info = self.remote.get_device_info()
+            client.publish(msg.topic + "/device_info", json.dumps(info))
+            _LOGGER.info("TV Info: %s", info)
+            return
+        
+        if payload == "VECTOR_INFO":
+            info = self.remote.get_vector_info()
+            client.publish(msg.topic + "/vector_info", json.dumps(info))
+            _LOGGER.info("Vector Info: %s", info)
+            return
+                
+        key_to_send = self._get_key_to_send(payload)
+        
         try:
-            # If payload matches enum name (case-insensitive)
-            if isinstance(payload, str):
-                try:
-                    key_to_send = Keys[payload.upper()]
-                except KeyError:
-                    # Try by value
-                    try:
-                        key_to_send = Keys(payload)
-                    except Exception:
-                        key_to_send = None
-            elif isinstance(payload, (int,)):
-                # numeric value -> send as-is (fallback)
-                key_to_send = payload
-        except Exception:
-            _LOGGER.debug("Could not map payload to Keys enum: %s", payload)
-
-        # Dispatch
-        try:
-            if key_to_send is not None:
+            if key_to_send is None:
+                _LOGGER.debug("Sending raw key via payload: %s", payload)
+                self.remote.send_key(str(payload))
+            else:
                 _LOGGER.debug("Sending key via enum: %s", key_to_send)
                 self.remote.send_key(key_to_send)
-            else:
-                _LOGGER.debug("Sending raw key via payload: %s", payload)
-                # send_key accepts either Keys or raw string code
-                self.remote.send_key(str(payload))
         except Exception:
             _LOGGER.exception("Failed to send key from MQTT payload: %s", payload)
+            self.remote.renew_session()

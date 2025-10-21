@@ -12,18 +12,3 @@ services:
       - mqtt
     env_file:
       - .env
-    # If you need host network access (for discovery/listen callbacks), uncomment:
-    # network_mode: "host"
-
-  mqtt:
-    image: eclipse-mosquitto:2.0
-    container_name: panasonic-mosquitto
-    restart: unless-stopped
-    ports:
-      - "1883:1883"
-    # No persistent config by default; mount volumes or provide config for production.
-    container_name: panasonic-mosquitto
-    restart: unless-stopped
-    ports:
-      - "1883:1883"
-    # No persistent config by default; mount volumes or provide config for production.

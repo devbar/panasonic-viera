@@ -13,7 +13,6 @@ import panasonic_viera
 
 MSG_TV_SWITCHED_OFF = "TV is switched off."
 
-
 class CommandRunner(object):
     """Runs defined commands."""
 

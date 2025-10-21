@@ -33,6 +33,7 @@ def main():
     enc_key = os.environ.get("TV_ENC_KEY", None)
     listen_host = os.environ.get("LISTEN_HOST", None)
     listen_port = _env_int("LISTEN_PORT", 55000)
+    proxy = os.environ.get("HTTP_PROXY", None)
 
     _LOGGER.info("Starting MQTT -> Panasonic Viera bridge (broker=%s:%d topic=%s)", broker, broker_port, topic)
 
@@ -44,6 +45,7 @@ def main():
         encryption_key=enc_key,
         listen_host=listen_host,
         listen_port=listen_port,
+        proxy=proxy,
     )
 
     subscriber = MqttRemoteSubscriber(

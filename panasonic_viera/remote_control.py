@@ -443,9 +443,7 @@ class RemoteControl:
         # upon each successful NRC command.
         self._session_id = enc_result_decrypted.find(".//X_SessionId").text
         self._session_seq_num = 1
-
-    # Taken from https://github.com/home-assistant/ file: home-assistant/homeassistant/util
-    # /__init__.py
+    
     def _get_local_ip(self):
         """Try to determine the local IP address of the machine."""
         try:
@@ -623,7 +621,7 @@ class RemoteControl:
         """Retrieve information from the TV."""
         url = URL_TEMPLATE.format(self._host, self._port, URL_CONTROL_NRC_DDD)
         req = Request(url)
-        res = self._urlopen(req, timeout=5).read()  # <-- Use _urlopen
+        res = self._urlopen(req, timeout=5).read()
         device_info = xmltodict.parse(res)["root"]["device"]
         return device_info
 
@@ -787,6 +785,11 @@ class RemoteControl:
         """Send the previous track command."""
         self.send_key(Keys.REWIND)
 
+    def renew_session(self):        
+        if self._type == TV_TYPE_ENCRYPTED:
+            self._derive_session_keys()
+            self._request_session_id()
+        
     @property
     def type(self):
         """Return TV type."""
