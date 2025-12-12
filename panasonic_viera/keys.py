@@ -1,7 +1,6 @@
 """Enum class containing all known keys for Panasonic Viera TV remote control."""
 from enum import Enum
 
-
 class Keys(Enum):
     """Contains all known keys."""
 

@@ -10,7 +10,6 @@ from .keys import Keys
 
 _LOGGER = logging.getLogger(__name__)
 
-
 class MqttRemoteSubscriber:
     """Subscribe to an MQTT topic and forward received key commands to a RemoteControl.
 
@@ -133,22 +132,46 @@ class MqttRemoteSubscriber:
             return
         
         if payload == "APPS":
-            apps = self.remote.get_apps()
-            client.publish(msg.topic + "/apps", json.dumps(apps))
+            try:
+                apps = self.remote.get_apps()
+                client.publish(msg.topic + "/apps", json.dumps(apps))
+            except Exception:
+                _LOGGER.exception("Failed to send key from MQTT payload: %s", payload)
+                self.remote.renew_session()
             _LOGGER.info("Available apps: %s", apps)
             return
         
         if payload == "DEVICE_INFO":
-            info = self.remote.get_device_info()
-            client.publish(msg.topic + "/device_info", json.dumps(info))
+            try:
+                info = self.remote.get_device_info()
+                client.publish(msg.topic + "/device_info", json.dumps(info))
+            except Exception:
+                _LOGGER.exception("Failed to send key from MQTT payload: %s", payload)
+                self.remote.renew_session()
             _LOGGER.info("TV Info: %s", info)
             return
         
         if payload == "VECTOR_INFO":
-            info = self.remote.get_vector_info()
-            client.publish(msg.topic + "/vector_info", json.dumps(info))
+            try:
+                info = self.remote.get_vector_info()
+                client.publish(msg.topic + "/vector_info", json.dumps(info))
+            except Exception:
+                _LOGGER.exception("Failed to send key from MQTT payload: %s", payload)
+                self.remote.renew_session()
             _LOGGER.info("Vector Info: %s", info)
             return
+        
+        if payload == "ON":
+            info = self.remote.get_apps()
+            if len(info) == 0:
+                self.remote.turn_on()                
+            return
+        
+        if payload == "OFF":
+            info = self.remote.get_apps()
+            if len(info) > 0:
+                self.remote.turn_off()               
+            return            
                 
         key_to_send = self._get_key_to_send(payload)
         

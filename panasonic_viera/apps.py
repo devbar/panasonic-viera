@@ -1,7 +1,6 @@
 """Enum class containing app product IDs for Panasonic Viera TV."""
 from enum import Enum
 
-
 class Apps(Enum):
     """Contains several app product IDs."""
 
