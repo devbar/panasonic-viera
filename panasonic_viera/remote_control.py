@@ -13,11 +13,7 @@ from xml.etree import ElementTree
 import aiohttp.web
 import xmltodict
 from Crypto.Cipher import AES
-
-try:
-    from urllib.request import urlopen, Request, HTTPError, build_opener, HTTPHandler
-except ImportError:
-    from urllib2 import urlopen, Request, HTTPError, build_opener, HTTPHandler
+from urllib.request import urlopen, Request, HTTPError, build_opener, HTTPHandler
 
 from .constants import (
     URN_RENDERING_CONTROL,
