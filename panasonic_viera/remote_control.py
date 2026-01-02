@@ -3,7 +3,6 @@ import logging
 import random
 import socket
 import base64
-import struct
 import re
 import asyncio
 from http import HTTPStatus
@@ -24,7 +23,7 @@ from .constants import (
     TV_TYPE_ENCRYPTED,
     DEFAULT_PORT,
 )
-from .exceptions import SOAPError, EncryptionRequired
+from .exceptions import EncryptionRequired
 from .keys import Keys
 from .apps import Apps
 from .soap_handler import SoapHandler
