@@ -6,7 +6,6 @@ from typing import Optional
 import paho.mqtt.client as mqtt
 
 from .remote_control import RemoteControl
-from .keys import Keys
 from .message_handler import MessageHandler
 
 _LOGGER = logging.getLogger(__name__)
@@ -109,23 +108,8 @@ class MqttRemoteSubscriber:
             else:                
                 return data
         except Exception:            
-            return payload_text
-        
-    def _get_key_to_send(self,payload):
-        try:            
-            if isinstance(payload, str):
-                try:
-                    return Keys[payload.upper()]
-                except KeyError:
-                    try:
-                        return Keys(payload)
-                    except Exception:
-                        return None
-            elif isinstance(payload, (int,)):
-                return payload
-        except Exception:
-            _LOGGER.debug("Could not map payload to Keys enum: %s", payload)
-            return None
+            return payload_text       
+    
 
     def _on_message(self, client, userdata, msg):
         self.message_handler.handle(msg)

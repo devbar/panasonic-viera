@@ -3,6 +3,7 @@ import logging
 import json
 
 from .remote_control import RemoteControl
+from .keys import Keys
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -40,6 +41,7 @@ class MessageHandler:
         except Exception as exp:
             _LOGGER.exception(f"Failed to send key from MQTT payload: {payload}", exp)
             self.remote.renew_session()
+            return
         _LOGGER.info(f"Available apps: {apps}")
         
     def _get_device_info(self, msg: any, payload: any):
@@ -49,8 +51,8 @@ class MessageHandler:
         except Exception as exp:
             _LOGGER.exception(f"Failed to send key from MQTT payload: {payload}", exp)
             self.remote.renew_session()
-        _LOGGER.info(f"TV Info: {info}", exp)
-        return
+            return
+        _LOGGER.info(f"TV Info: {info}")        
     
     def _get_vector_info(self, msg: any, payload: any):
         try:
@@ -59,14 +61,14 @@ class MessageHandler:
         except Exception as exp:
             _LOGGER.exception(f"Failed to send key from MQTT payload: {payload}", exp)
             self.remote.renew_session()
-        _LOGGER.info(f"Vector Info: {info}", exp)
-        return
+            return
+        _LOGGER.info(f"Vector Info: {info}")
     
     def _turn_on(self):
         try:
             info = self.remote.get_apps()
             if len(info) == 0:
-                self.remote.turn_on() 
+              self.remote.turn_on() 
         except Exception as exp:
             _LOGGER.exception(f"Failed to turn on TV from MQTT payload", exp)
             self.remote.renew_session()
@@ -74,16 +76,32 @@ class MessageHandler:
     def _turn_off(self):
         try:
             info = self.remote.get_apps()
-            if len(info) == 0:
+            if len(info) != 0:
                 self.remote.turn_off() 
         except Exception as exp:
             _LOGGER.exception(f"Failed to turn off TV from MQTT payload", exp)
             self.remote.renew_session()
+            
+    def _get_key_to_send(self,payload):
+        try:            
+            if isinstance(payload, str):
+                try:
+                    return Keys[payload.upper()]
+                except KeyError:
+                    try:
+                        return Keys(payload)
+                    except Exception:
+                        return None
+            elif isinstance(payload, (int,)):
+                return payload
+        except Exception:
+            _LOGGER.debug("Could not map payload to Keys enum: %s", payload)
+            return None
     
     def handle(self, msg):
         payload = self._get_payload(msg)
 
-        if payload is None:
+        if payload is None or len(payload) == 0:
             _LOGGER.debug("Empty payload received on topic %s", msg.topic)
             return
         
