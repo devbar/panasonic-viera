@@ -65,3 +65,4 @@ target/
 .idea/
 
 .env
+.aider*

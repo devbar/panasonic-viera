@@ -31,10 +31,7 @@ class SoapHandler:
     def _get_opener(self):
         """Return an opener with proxy if set."""
         if self._proxy:
-            try:
-                from urllib.request import ProxyHandler
-            except ImportError:
-                from urllib2 import ProxyHandler
+            from urllib.request import ProxyHandler
             proxy_handler = ProxyHandler({'http': self._proxy, 'https': self._proxy})
             return build_opener(proxy_handler, HTTPHandler)
         return build_opener(HTTPHandler)
@@ -43,7 +40,40 @@ class SoapHandler:
         """Open a URL with proxy support."""
         opener = self._get_opener()
         return opener.open(req, timeout=timeout)
-
+    
+    def _is_encrypted_request(self,encryption_context, urn, action):
+        if encryption_context and urn == URN_REMOTE_CONTROL and action not in [
+            "X_GetEncryptSessionId",
+            "X_DisplayPinCode",
+            "X_RequestAuth",
+        ]:
+            return True
+        return False
+    
+    def _encrypt_request(self,encryption_context, urn, action, params) -> dict:
+        encrypted_command = self.encrypt_payload(
+            (
+                f"<X_SessionId>{encryption_context['session_id']}</X_SessionId>"
+                f"<X_SequenceNumber>{encryption_context['session_seq_num']:08d}</X_SequenceNumber>"
+                "<X_OriginalCommand>"
+                f'<u:{action} xmlns:u="urn:{urn}">'
+                f"{params}"
+                f"</u:{action}>"
+                "</X_OriginalCommand>"
+            ),
+            encryption_context['session_key'],
+            encryption_context['session_iv'],
+            encryption_context['session_hmac_key'],
+        )
+        return {
+            "action": "X_EncryptedCommand",
+            "params": (
+                f"<X_ApplicationId>{encryption_context['app_id']}</X_ApplicationId>"
+                f"<X_EncInfo>{encrypted_command}</X_EncInfo>"
+            ),
+            "body_elem": "u"
+        }
+        
     def send_request(self, url, urn, action, params, body_elem="m", encryption_context=None):
         """Send a SOAP request to the TV.
         
@@ -66,42 +96,18 @@ class SoapHandler:
         Returns:
             The response body as a string
         """
-        is_encrypted = False
+        is_encrypted = self._is_encrypted_request(encryption_context, urn, action)
         original_seq_num = None
 
         # Encapsulate URN_REMOTE_CONTROL command in an X_EncryptedCommand if we're using encryption
-        if encryption_context and urn == URN_REMOTE_CONTROL and action not in [
-            "X_GetEncryptSessionId",
-            "X_DisplayPinCode",
-            "X_RequestAuth",
-        ]:
-            is_encrypted = True
+        if is_encrypted:
             original_seq_num = encryption_context['session_seq_num']
             encryption_context['session_seq_num'] += 1
             
-            encrypted_command = (
-                f"<X_SessionId>{encryption_context['session_id']}</X_SessionId>"
-                f"<X_SequenceNumber>{encryption_context['session_seq_num']:08d}</X_SequenceNumber>"
-                "<X_OriginalCommand>"
-                f'<u:{action} xmlns:u="urn:{urn}">'
-                f"{params}"
-                f"</u:{action}>"
-                "</X_OriginalCommand>"
-            )
-
-            encrypted_command = self.encrypt_payload(
-                encrypted_command,
-                encryption_context['session_key'],
-                encryption_context['session_iv'],
-                encryption_context['session_hmac_key'],
-            )
-
-            action = "X_EncryptedCommand"
-            params = (
-                f"<X_ApplicationId>{encryption_context['app_id']}</X_ApplicationId>"
-                f"<X_EncInfo>{encrypted_command}</X_EncInfo>"
-            )
-            body_elem = "u"
+            a = self._encrypt_request(encryption_context, urn, action, params)
+            action = a["action"]            
+            params = a["params"]
+            body_elem = a["body_elem"]
 
         # Construct SOAP request
         soap_body = (
