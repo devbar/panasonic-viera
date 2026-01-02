@@ -4,16 +4,13 @@ import random
 import socket
 import base64
 import struct
-import hmac
-import hashlib
-from http import HTTPStatus
 import re
 import asyncio
+from http import HTTPStatus
 from xml.etree import ElementTree
 import aiohttp.web
 import xmltodict
-from Crypto.Cipher import AES
-from urllib.request import urlopen, Request, HTTPError, build_opener, HTTPHandler
+from urllib.request import urlopen, Request, HTTPError
 
 from .constants import (
     URN_RENDERING_CONTROL,
@@ -26,11 +23,11 @@ from .constants import (
     TV_TYPE_NONENCRYPTED,
     TV_TYPE_ENCRYPTED,
     DEFAULT_PORT,
-    pad,
 )
 from .exceptions import SOAPError, EncryptionRequired
 from .keys import Keys
 from .apps import Apps
+from .soap_handler import SoapHandler
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -68,6 +65,9 @@ class RemoteControl:
         self._aiohttp_server = None
         self._server = None
 
+        # Initialize SOAP handler
+        self._soap = SoapHandler(host, port, proxy)
+
         if self._app_id is None or self._enc_key is None:
             self._type = TV_TYPE_NONENCRYPTED
         else:
@@ -95,113 +95,51 @@ class RemoteControl:
             )
             _LOGGER.debug("Determined TV type is %s\n", tv_enc_type)
 
-    def _get_opener(self):
-        """Return an opener with proxy if set."""
-        if self._proxy:
-            proxy_handler = None
-            try:
-                from urllib.request import ProxyHandler
-            except ImportError:
-                from urllib2 import ProxyHandler
-            proxy_handler = ProxyHandler({'http': self._proxy, 'https': self._proxy})
-            return build_opener(proxy_handler, HTTPHandler)
-        else:
-            return build_opener(HTTPHandler)
-
-    def _urlopen(self, req, timeout=5):
-        """Open a URL with proxy support."""
-        opener = self._get_opener()
-        return opener.open(req, timeout=timeout)
+    def _get_encryption_context(self):
+        """Get the current encryption context for SOAP requests."""
+        if None in [
+            self._session_key,
+            self._session_iv,
+            self._session_hmac_key,
+            self._session_id,
+            self._session_seq_num,
+        ]:
+            return None
+        
+        return {
+            'app_id': self._app_id,
+            'session_id': self._session_id,
+            'session_seq_num': self._session_seq_num,
+            'session_key': self._session_key,
+            'session_iv': self._session_iv,
+            'session_hmac_key': self._session_hmac_key,
+        }
 
     def soap_request(self, url, urn, action, params, body_elem="m"):
         """Send a SOAP request to the TV."""
-
-        is_encrypted = False
-
-        # Encapsulate URN_REMOTE_CONTROL command in an X_EncryptedCommand if we're using encryption
+        encryption_context = None
+        
+        # Check if we need encryption for this request
         if urn == URN_REMOTE_CONTROL and action not in [
             "X_GetEncryptSessionId",
             "X_DisplayPinCode",
             "X_RequestAuth",
         ]:
-            if None not in [
-                self._session_key,
-                self._session_iv,
-                self._session_hmac_key,
-                self._session_id,
-                self._session_seq_num,
-            ]:
-                is_encrypted = True
-                self._session_seq_num += 1
-                body_elem = "u"
-                encrypted_command = (
-                    f"<X_SessionId>{self._session_id}</X_SessionId>"
-                    f"<X_SequenceNumber>{self._session_seq_num:08d}</X_SequenceNumber>"
-                    "<X_OriginalCommand>"
-                    f'<{body_elem}:{action} xmlns:{body_elem}="urn:{urn}">'
-                    f"{params}"
-                    f"</{body_elem}:{action}>"
-                    "</X_OriginalCommand>"
-                )
-
-                encrypted_command = self._encrypt_soap_payload(
-                    encrypted_command,
-                    self._session_key,
-                    self._session_iv,
-                    self._session_hmac_key,
-                )
-
-                action = "X_EncryptedCommand"
-                params = (
-                    f"<X_ApplicationId>{self._app_id}</X_ApplicationId>"
-                    f"<X_EncInfo>{encrypted_command}</X_EncInfo>"
-                )
-                body_elem = "u"
-            elif self._type == TV_TYPE_ENCRYPTED:
+            encryption_context = self._get_encryption_context()
+            if encryption_context is None and self._type == TV_TYPE_ENCRYPTED:
                 raise EncryptionRequired(
                     "Please refer to the docs for using encryption"
                 )
 
-        # Construct SOAP request
-        soap_body = (
-            '<?xml version="1.0" encoding="utf-8"?>'
-            '<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"'
-            ' s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">'
-            "<s:Body>"
-            f'<{body_elem}:{action} xmlns:{body_elem}="urn:{urn}">'
-            f"{params}"
-            f"</{body_elem}:{action}>"
-            "</s:Body>"
-            "</s:Envelope>"
-        ).encode("utf-8")
-
-        headers = {
-            "Host": f"{self._host}:{self._port}",
-            "Content-Length": len(soap_body),
-            "Content-Type": "text/xml; charset=utf-8",
-            "SOAPAction": f'"urn:{urn}#{action}"',
-        }
-
-        url = URL_TEMPLATE.format(self._host, self._port, url)
-
-        _LOGGER.debug("Sending to %s:\n%s\n%s", url, headers, soap_body)
-        req = Request(url, soap_body, headers)
         try:
-            res = self._urlopen(req, timeout=5).read()
+            res = self._soap.send_request(url, urn, action, params, body_elem, encryption_context)
         except HTTPError as ex:
-            if self._session_seq_num is not None:
-                self._session_seq_num -= 1
-            raise ex  # Pass to the next handler
-        _LOGGER.debug("Response: %s", res)
-
-        if is_encrypted:
-            root = ElementTree.fromstring(res)
-            enc_result = root.find(".//X_EncResult").text
-            enc_result_decrypted = self._decrypt_soap_payload(
-                enc_result, self._session_key, self._session_iv, self._session_hmac_key
-            )
-            res = enc_result_decrypted
-
+            raise ex
+        
+        # Update sequence number if it was modified
+        if encryption_context:
+            self._session_seq_num = encryption_context['session_seq_num']
+        
         return res
 
     def _derive_session_keys(self):
@@ -225,48 +163,10 @@ class RemoteControl:
             i += 4
 
         # Convert our key character codes to bytes
-        # self._session_key = ''.join(chr(c) for c in key_vals)
         self._session_key = bytearray(c for c in key_vals)
 
         # HMAC key for comms is just the IV repeated twice
         self._session_hmac_key = init_vector * 2
-
-    def _encrypt_soap_payload(self, data, key, init_vector, hmac_key):
-        # The encrypted payload must begin with a 16-byte header (12 random bytes, and 4 bytes for
-        # the payload length in big endian)
-        # Note: the server does not appear to ever send back valid payload lengths in bytes 13-16,
-        # so I would assume these can also be randomized by the client, but we'll set them anyway
-        # to be safe.
-        payload = bytearray(random.randint(0, 255) for _ in range(12))
-        payload += struct.pack(">I", len(data))
-        payload += data.encode("latin-1")
-
-        # For compatibility with both Python 2.x and 3.x, flattening types to 'str' or 'bytes'
-        init_vector = init_vector.decode("latin-1").encode("latin-1")
-        key = key.decode("latin-1").encode("latin-1")
-        payload = pad(payload.decode("latin-1")).encode("latin-1")
-        hmac_key = hmac_key.decode("latin-1").encode("latin-1")
-
-        # Initialize AES-CBC with key and IV
-        aes = AES.new(key, AES.MODE_CBC, init_vector)
-        # Encrypt with zero-padding
-        ciphertext = aes.encrypt(payload)
-        # Compute HMAC-SHA-256
-        sig = hmac.new(hmac_key, ciphertext, hashlib.sha256).digest()
-        # Concat HMAC with AES-encrypted payload
-        return base64.b64encode(ciphertext + sig).decode("latin-1")
-
-    def _decrypt_soap_payload(self, data, key, init_vector, hmac_key):
-        # For compatibility with both Python 2.x and 3.x, flattening types to 'str' or 'bytes'
-        key = key.decode("latin-1").encode("latin-1")
-        init_vector = init_vector.decode("latin-1").encode("latin-1")
-
-        # Initialize AES-CBC with key and IV
-        aes = AES.new(key, AES.MODE_CBC, init_vector)
-        # Decrypt
-        decrypted = aes.decrypt(base64.b64decode(data)).decode("latin-1")
-        # Unpad and return
-        return decrypted[16:].split("\0")[0]
 
     def request_pin_code(self, name="My Remote"):
         # First let's ask for a pin code and get a challenge key back
@@ -280,13 +180,8 @@ class RemoteControl:
                 body_elem="u",
             )
         except HTTPError as ex:
-            if ex.code == 500:
-                xml = ElementTree.fromstring(ex.fp.read())
-                for child in xml.iter():
-                    if child.tag.endswith("errorDescription"):
-                        raise SOAPError(child.text)
-                return
-            raise ex  # Pass to the next handler
+            self._soap.handle_soap_error(ex)
+            return
         root = ElementTree.fromstring(res)
         self._challenge = bytearray(
             base64.b64decode(root.find(".//X_ChallengeKey").text)
@@ -352,7 +247,7 @@ class RemoteControl:
             i += 4
 
         # Encrypt X_PinCode argument and send it within an X_AuthInfo tag
-        payload = self._encrypt_soap_payload(
+        payload = self._soap.encrypt_payload(
             f"<X_PinCode>{pincode}</X_PinCode>", key, init_vector, hmac_key
         )
         params = f"<X_AuthInfo>{payload}</X_AuthInfo>"
@@ -365,20 +260,13 @@ class RemoteControl:
                 body_elem="u",
             )
         except HTTPError as ex:
-            if ex.code == 500:
-                xml = ElementTree.fromstring(ex.fp.read())
-                for child in xml.iter():
-                    if child.tag.endswith("errorCode") and child.text == "600":
-                        raise SOAPError("Invalid PIN Code!")
-                    elif child.tag.endswith("errorDescription"):
-                        raise SOAPError(child.text)
-                return
-            raise ex  # Pass to the next handler
+            self._soap.handle_soap_error(ex)
+            return
 
         # Parse and decrypt X_AuthResult
         root = ElementTree.fromstring(res)
         auth_result = root.find(".//X_AuthResult").text
-        payload = self._decrypt_soap_payload(auth_result, key, init_vector, hmac_key)
+        payload = self._soap.decrypt_payload(auth_result, key, init_vector, hmac_key)
         auth_result_decrypted = ElementTree.fromstring(f"<X_Data>{payload}</X_Data>")
 
         # Set session application ID and encryption key
@@ -396,7 +284,7 @@ class RemoteControl:
         # NRC commands.
 
         # We need to send an encrypted version of X_ApplicationId
-        encinfo = self._encrypt_soap_payload(
+        encinfo = self._soap.encrypt_payload(
             "<X_ApplicationId>" + self._app_id + "</X_ApplicationId>",
             self._session_key,
             self._session_iv,
@@ -417,19 +305,14 @@ class RemoteControl:
                 body_elem="u",
             )
         except HTTPError as ex:
-            if ex.code == 500:
-                xml = ElementTree.fromstring(ex.fp.read())
-                for child in xml.iter():
-                    if child.tag.endswith("errorDescription"):
-                        raise SOAPError(child.text)
-                return
-            raise ex  # Pass to the next handler
+            self._soap.handle_soap_error(ex)
+            return
 
         root = ElementTree.fromstring(res)
         enc_result = root.find(".//X_EncResult").text
         enc_result_decrypted = ElementTree.fromstring(
             "<X_Data>"
-            + self._decrypt_soap_payload(
+            + self._soap.decrypt_payload(
                 enc_result, self._session_key, self._session_iv, self._session_hmac_key
             )
             + "</X_Data>"
@@ -458,9 +341,8 @@ class RemoteControl:
             sock.close()
 
     def _do_custom_request(self, method, url, headers=None, timeout=10):
-        opener = self._get_opener()  # <-- Use proxy-aware opener
         req = Request(url, headers=headers, method=method)
-        res = opener.open(req, timeout=timeout)
+        res = self._soap._urlopen(req, timeout=timeout)
         status = res.status
         header = dict(res.info())
         return status, header
@@ -617,7 +499,7 @@ class RemoteControl:
         """Retrieve information from the TV."""
         url = URL_TEMPLATE.format(self._host, self._port, URL_CONTROL_NRC_DDD)
         req = Request(url)
-        res = self._urlopen(req, timeout=5).read()
+        res = self._soap._urlopen(req, timeout=5).read()
         device_info = xmltodict.parse(res)["root"]["device"]
         return device_info
 
