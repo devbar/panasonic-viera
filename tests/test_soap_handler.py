@@ -180,7 +180,10 @@ class TestSoapHandler(unittest.TestCase):
         mock_decrypt.return_value = "<decrypted>response</decrypted>"
         
         mock_response = MagicMock()
-        mock_response.read.return_value = b'<s:Envelope><X_EncResult>encrypted_result</X_EncResult></s:Envelope>'
+        mock_response.read.return_value = (
+            b'<?xml version="1.0" encoding="utf-8"?>'
+            b'<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">'
+            b'<X_EncResult>encrypted_result</X_EncResult></s:Envelope>')
         mock_urlopen.return_value = mock_response
         
         mock_request = MagicMock()
@@ -274,7 +277,7 @@ class TestSoapHandler(unittest.TestCase):
         """Test handle_soap_error with error description."""
         from urllib.request import HTTPError
         
-        error_xml = b'<?xml version="1.0"?><s:Envelope><s:Body><s:Fault><detail><UPnPError><errorCode>401</errorCode><errorDescription>Invalid Action</errorDescription></UPnPError></detail></s:Fault></s:Body></s:Envelope>'
+        error_xml = b'<?xml version="1.0"?><s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/"><s:Body><s:Fault><detail><UPnPError><errorCode>401</errorCode><errorDescription>Invalid Action</errorDescription></UPnPError></detail></s:Fault></s:Body></s:Envelope>'
         
         mock_fp = MagicMock()
         mock_fp.read.return_value = error_xml
@@ -290,7 +293,7 @@ class TestSoapHandler(unittest.TestCase):
         """Test handle_soap_error with invalid PIN code."""
         from urllib.request import HTTPError
         
-        error_xml = b'<?xml version="1.0"?><s:Envelope><s:Body><s:Fault><detail><UPnPError><errorCode>600</errorCode></UPnPError></detail></s:Fault></s:Body></s:Envelope>'
+        error_xml = b'<?xml version="1.0"?><s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/"><s:Body><s:Fault><detail><UPnPError><errorCode>600</errorCode></UPnPError></detail></s:Fault></s:Body></s:Envelope>'
         
         mock_fp = MagicMock()
         mock_fp.read.return_value = error_xml
