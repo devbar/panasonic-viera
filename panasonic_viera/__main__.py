@@ -182,12 +182,15 @@ class RemoteControl(object):
 
 def main():
     """Handle command line execution."""
+    
     parser = argparse.ArgumentParser(
         prog="panasonic_viera", description="Remote control a Panasonic Viera TV."
     )
+    
     parser.add_argument(
         "host", metavar="host", type=str, help="Address of the Panasonic Viera TV"
     )
+    
     parser.add_argument(
         "port",
         metavar="port",
@@ -199,6 +202,7 @@ def main():
             f"Defaults to {panasonic_viera.DEFAULT_PORT}."
         ),
     )
+    
     parser.add_argument(
         "--verbose",
         dest="verbose",
@@ -207,7 +211,10 @@ def main():
         default=False,
         help="debug output",
     )
+    
     args = parser.parse_args()
+    
+    logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
 
     if args.verbose:
         logging.basicConfig(level=logging.DEBUG)

@@ -7,6 +7,7 @@ import paho.mqtt.client as mqtt
 
 from .remote_control import RemoteControl
 from .keys import Keys
+from .message_handler import MessageHandler
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -45,6 +46,8 @@ class MqttRemoteSubscriber:
         self._client.on_connect = self._on_connect
         self._client.on_message = self._on_message
         self._client.on_disconnect = self._on_disconnect
+        
+        self.message_handler = MessageHandler(self._client, self.remote)
 
     def start(self, keepalive: int = 60):
         """Connect to broker and start network loop."""
@@ -125,63 +128,4 @@ class MqttRemoteSubscriber:
             return None
 
     def _on_message(self, client, userdata, msg):
-        payload = self._get_payload(msg)
-
-        if payload is None:
-            _LOGGER.debug("Empty payload received on topic %s", msg.topic)
-            return
-        
-        if payload == "APPS":
-            try:
-                apps = self.remote.get_apps()
-                client.publish(msg.topic + "/apps", json.dumps(apps))
-            except Exception:
-                _LOGGER.exception("Failed to send key from MQTT payload: %s", payload)
-                self.remote.renew_session()
-            _LOGGER.info("Available apps: %s", apps)
-            return
-        
-        if payload == "DEVICE_INFO":
-            try:
-                info = self.remote.get_device_info()
-                client.publish(msg.topic + "/device_info", json.dumps(info))
-            except Exception:
-                _LOGGER.exception("Failed to send key from MQTT payload: %s", payload)
-                self.remote.renew_session()
-            _LOGGER.info("TV Info: %s", info)
-            return
-        
-        if payload == "VECTOR_INFO":
-            try:
-                info = self.remote.get_vector_info()
-                client.publish(msg.topic + "/vector_info", json.dumps(info))
-            except Exception:
-                _LOGGER.exception("Failed to send key from MQTT payload: %s", payload)
-                self.remote.renew_session()
-            _LOGGER.info("Vector Info: %s", info)
-            return
-        
-        if payload == "ON":
-            info = self.remote.get_apps()
-            if len(info) == 0:
-                self.remote.turn_on()                
-            return
-        
-        if payload == "OFF":
-            info = self.remote.get_apps()
-            if len(info) > 0:
-                self.remote.turn_off()               
-            return            
-                
-        key_to_send = self._get_key_to_send(payload)
-        
-        try:
-            if key_to_send is None:
-                _LOGGER.debug("Sending raw key via payload: %s", payload)
-                self.remote.send_key(str(payload))
-            else:
-                _LOGGER.debug("Sending key via enum: %s", key_to_send)
-                self.remote.send_key(key_to_send)
-        except Exception:
-            _LOGGER.exception("Failed to send key from MQTT payload: %s", payload)
-            self.remote.renew_session()
+        self.message_handler.handle(msg)
